@@ -1,4 +1,4 @@
-use crate::{chunk::RawChunk, compression::CompressionType, McaError, SECTOR_SIZE};
+use crate::{chunk::RawChunk, compression::CompressionType, McaError, REGION_SIZE, SECTOR_SIZE};
 
 /// A Minecraft region
 ///
@@ -29,15 +29,15 @@ impl<'a> RegionReader<'a> {
     /// Used in getting byte offsets for chunk location & timestamp in headers
     #[inline(always)]
     pub fn chunk_offset(x: usize, z: usize) -> usize {
-        assert!(x < 32);
-        assert!(z < 32);
+        assert!(x < REGION_SIZE);
+        assert!(z < REGION_SIZE);
 
-        4 * ((x & 31) + (z & 31) * 32)
+        4 * ((x & (REGION_SIZE - 1)) + (z & (REGION_SIZE - 1)) * REGION_SIZE)
     }
 
     /// Get a single [`RawChunk`] based of it's chunk coordinates relative to the region itself.  
     /// Will return [`None`] if chunk hasn't been generated yet.
-    pub fn get_chunk(&self, x: usize, z: usize) -> Result<Option<RawChunk>, McaError> {
+    pub fn get_chunk(&'a self, x: usize, z: usize) -> Result<Option<RawChunk<'a>>, McaError> {
         // just so we dont have to call .len() more than needed, data len stays the same
         let data_len = self.data.len();
 
@@ -188,7 +188,7 @@ impl<'a> RegionReader<'a> {
         u32::from_be_bytes(timestamp_bytes)
     }
 
-    pub fn iter(&self) -> RegionIter {
+    pub fn iter(&'a self) -> RegionIter<'a> {
         RegionIter {
             region: self,
             index: 0,
@@ -205,11 +205,11 @@ pub struct RegionIter<'a> {
 
 impl<'a> RegionIter<'a> {
     /// The max size of chunks inside one region
-    pub const MAX: usize = 32 * 32;
+    pub const MAX: usize = REGION_SIZE * REGION_SIZE;
 
     /// Get the chunk coordinate based off (index / [`RegionIter::MAX`])
     pub fn get_chunk_coordinate(index: usize) -> (usize, usize) {
-        (index % 32, index / 32)
+        (index % REGION_SIZE, index / REGION_SIZE)
     }
 }
 

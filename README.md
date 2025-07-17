@@ -38,7 +38,7 @@ let data = vec![]; // some chunk data to write
 let mut writer = RegionWriter::new();
 
 // Push a chunk to the writer
-writer.push_chunk(&data, 0, 0)?;
+writer.push_chunk(&data, (0, 0))?;
 
 // Write the writer to a buffer
 let mut buf = vec![];

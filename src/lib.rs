@@ -1,3 +1,71 @@
+//! # mca
+//! A simple but effective & fast writer / reader for Minecrafts Region Files (mca).
+//!
+//! Reading a chunk and decompressing it's data
+//! ```
+//! use std::{fs::File, io::Read};
+//! use mca::RegionReader;
+//!
+//! let mut data = Vec::new();
+//! File::open("r.0.0.mca")?.read_to_end(&mut data)?;
+//!
+//! // Initialize the region
+//! // This mostly just validates the header
+//! let region = RegionReader::new(&data)?;
+//!
+//! // Get a specific chunk based of it's chunk coordinates
+//! let chunk = region.get_chunk(0, 0)?.unwrap();
+//!
+//! // Decompress the chunk data
+//! // This will most commonly be either ZLib or LZ4 compressed
+//! let decompressed = chunk.decompress()?;
+//!
+//! // You can now bring your own NBT parser to parse the actual chunk data here
+//! // I recommend either `simdnbt` or `fastnbt` for this.
+//! ```
+//!
+//! And you can very easily write back the data
+//! ```
+//! use std::{fs::File};
+//! use mca::RegionWriter;
+//!
+//! let data = vec![]; // some chunk data to write
+//!
+//! // Initialize the region writer
+//! let mut writer = RegionWriter::new();
+//!
+//! // Push a chunk to the writer
+//! writer.push_chunk(&data, (0, 0))?;
+//!
+//! // Write the writer to a buffer
+//! let mut buf = vec![];
+//! writer.write(&mut buf)?;
+//!
+//! // Write the buffer to a file
+//! File::create("r.0.0.mca")?.write_all(&buf)?;
+//! ```
+//!
+//! Theres also a [`RegionIter`] that you can use to easily iterate over all possible chunks in a region.
+//! ```
+//! use mca::RegionReader;
+//!
+//! // Here you will actually get the region data
+//! let data = vec![];
+//! let region = RegionReader::new(&data)?;
+//!
+//! // Then just call `.iter()` on the region
+//! for chunk in region.iter() {
+//!     // Iterator item is a Result<Option<RawChunk>>
+//!     // So after the first unwrap we check if
+//!     // there's actually a chunk or not
+//!     if let Some(chunk) = chunk.unwrap() {
+//!         // found chunk
+//!     } else {
+//!         // no chunk
+//!     }    
+//! }
+//! ```
+
 mod chunk;
 mod compression;
 mod error;
@@ -10,6 +78,10 @@ pub use error::McaError;
 pub use reader::{RegionIter, RegionReader};
 pub use writer::RegionWriter;
 
+/// How wide / tall a region is.  
+///
+/// *`(REGION_SIZE * REGION_SIZE)`*  
+pub const REGION_SIZE: usize = 32;
 const SECTOR_SIZE: usize = 4096;
 
 #[cfg(test)]

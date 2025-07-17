@@ -1,4 +1,4 @@
-use crate::{compression::CompressionType, McaError};
+use crate::{compression::CompressionType, McaError, REGION_SIZE};
 
 /// A raw compressed chunk, holds the compression type used.  
 /// And the specific chunk byte slice from the region data
@@ -31,7 +31,7 @@ impl<'a> RawChunk<'a> {
     }
 
     /// Creates a new raw chunk from it's bytes and compression type
-    pub fn new(data: &'a [u8], compression: CompressionType) -> RawChunk {
+    pub fn new(data: &'a [u8], compression: CompressionType) -> RawChunk<'a> {
         RawChunk {
             raw_data: data,
             compression_type: compression,
@@ -61,16 +61,51 @@ impl PendingChunk {
     ///
     /// let chunk = PendingChunk::new(&data, CompressionType::LZ4, 1724372177, (4, 6));
     /// ```
-    pub fn new(
+    pub fn new<B>(
         raw_data: &[u8],
         compression: CompressionType,
         timestamp: u32,
-        coordinate: (u8, u8),
-    ) -> Result<PendingChunk, McaError> {
-        assert!(coordinate.0 < 32);
-        assert!(coordinate.1 < 32);
+        coordinate: (B, B),
+    ) -> Result<PendingChunk, McaError>
+    where
+        B: Into<u8>,
+    {
+        let coordinate = (coordinate.0.into(), coordinate.1.into());
+        assert!(coordinate.0 < REGION_SIZE as u8);
+        assert!(coordinate.1 < REGION_SIZE as u8);
 
         let compressed_data = compression.compress(&raw_data)?;
+
+        Ok(PendingChunk {
+            compressed_data,
+            compression,
+            timestamp,
+            coordinate,
+        })
+    }
+
+    /// Create a new pending chunk with already compressed data
+    ///
+    /// ## Example
+    /// ```ignore
+    /// use mca::{PendingChunk, CompressionType};
+    ///
+    /// let data: Vec<u8> = // ...
+    ///
+    /// let chunk = PendingChunk::new_compressed(&data, CompressionType::LZ4, 1724372177, (4, 6));
+    /// ```
+    pub fn new_compressed<B>(
+        compressed_data: Vec<u8>,
+        compression: CompressionType,
+        timestamp: u32,
+        coordinate: (B, B),
+    ) -> Result<PendingChunk, McaError>
+    where
+        B: Into<u8>,
+    {
+        let coordinate = (coordinate.0.into(), coordinate.1.into());
+        assert!(coordinate.0 < REGION_SIZE as u8);
+        assert!(coordinate.1 < REGION_SIZE as u8);
 
         Ok(PendingChunk {
             compressed_data,

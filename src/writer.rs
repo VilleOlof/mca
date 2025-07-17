@@ -4,7 +4,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{chunk::PendingChunk, CompressionType, McaError, SECTOR_SIZE};
+use crate::{chunk::PendingChunk, CompressionType, McaError, REGION_SIZE, SECTOR_SIZE};
 
 /// A writer used to write chunks to a region (`mca`) file.  
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -29,7 +29,10 @@ impl RegionWriter {
     /// Defaults to `LZ4` compression, use [`push_chunk_with_compression`] for other compression types.  
     ///
     /// Timestamp will be current time since [`UNIX_EPOCH`], use [`push_pending_chunk`] to override it.  
-    pub fn push_chunk(&mut self, raw_data: &[u8], coordinate: (u8, u8)) -> Result<(), McaError> {
+    pub fn push_chunk<B>(&mut self, raw_data: &[u8], coordinate: (B, B)) -> Result<(), McaError>
+    where
+        B: Into<u8>,
+    {
         let chunk = PendingChunk::new(
             &raw_data,
             CompressionType::LZ4,
@@ -43,12 +46,15 @@ impl RegionWriter {
 
     /// Pushes a raw chunk into the writer  
     /// This specifies the compression type used  
-    pub fn push_chunk_with_compression(
+    pub fn push_chunk_with_compression<B>(
         &mut self,
         raw_data: &[u8],
-        coordinate: (u8, u8),
+        coordinate: (B, B),
         compression_type: CompressionType,
-    ) -> Result<(), McaError> {
+    ) -> Result<(), McaError>
+    where
+        B: Into<u8>,
+    {
         let chunk = PendingChunk::new(
             &raw_data,
             compression_type,
@@ -116,8 +122,8 @@ impl RegionWriter {
         }
 
         // location header
-        for x in 0..32 {
-            for z in 0..32 {
+        for x in 0..REGION_SIZE {
+            for z in 0..REGION_SIZE {
                 let offset = match chunk_offsets.get(&(z as u8, x as u8)) {
                     Some(offset) => offset,
                     None => {
@@ -144,9 +150,9 @@ impl RegionWriter {
         }
 
         // timestamp header
-        for x in 0..32 {
-            for z in 0..32 {
-                match &self.chunks.get(x * 32 + z) {
+        for x in 0..REGION_SIZE {
+            for z in 0..REGION_SIZE {
+                match &self.chunks.get(x * REGION_SIZE + z) {
                     Some(chunk) => {
                         let timestamp = {
                             let b = chunk.timestamp.to_be_bytes();
@@ -189,7 +195,7 @@ mod tests {
             writer
                 .push_chunk_with_compression(
                     &data,
-                    ((idx % 32) as u8, (idx / 32) as u8),
+                    ((idx % REGION_SIZE) as u8, (idx / REGION_SIZE) as u8),
                     CompressionType::Zlib,
                 )
                 .unwrap();

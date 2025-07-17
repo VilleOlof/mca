@@ -2,7 +2,7 @@
 [package]
 name = "mca"
 description = "Read / Write Minecraft Region Files (mca)"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["VilleOlof"]
@@ -14,7 +14,7 @@ categories = ["game-development", "parsing"]
 
 [dependencies]
 thiserror = "1.0"
-miniz_oxide = { version = "0.8.0", features = ["std"] }
+miniz_oxide = { version = "0.8.9", features = ["std"] }
 lz4-java-wrc = "0.2.0"
 
 [dev-dependencies]
