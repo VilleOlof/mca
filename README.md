@@ -98,7 +98,7 @@ This includes the rather obscure feature of using custom compression schemes for
 The [wiki](https://minecraft.wiki/w/Region_file_format#Payload) states that a compression byte of `127` indicates a custom compression.  
 Where it's then followed by a prefixed string containing the **id** of the compression algorithm.  
 
-Below is a tiny example, for a fully working **lzma2** example. Look at [custom_compression.rs](https://github.com/VilleOlof/mca/src/custom_compression.rs) and it's tests.  
+Below is a tiny example, for a fully working **lzma2** example. Look at [custom_compression.rs](https://github.com/VilleOlof/mca/blob/main/src/custom_compression.rs) and it's tests.  
 
 Both `RegionReader` and `RegionWriter` defaults to `()` as its custom compression scheme.  
 Which will return `Err(CompressionError::Unsupported)` if it's ever called.  
@@ -206,8 +206,8 @@ at the bottom of any source file, `read.rs` and `write.rs` have some good exampl
 
 ## Benchmarks
 
-A [benchmark](https://github.com/VilleOlof/mca/benches/compare.rs) comparing mca against all `.mca` parsers I could find.  
-This is in **reading** a fully generated, zlib compressed [region file](https://github.com/VilleOlof/mca/data/full.mca).  
+A [benchmark](https://github.com/VilleOlof/mca/blob/main/benches/compare.rs) comparing mca against all `.mca` parsers I could find.  
+This is in **reading** a fully generated, zlib compressed [region file](https://github.com/VilleOlof/mca/blob/main/data/full.mca).  
 As some of these don't support writing region files.  
 
 | Library                                               | Throughput   | Ms *(mean)* |
