@@ -1,31 +1,65 @@
-
 [package]
 name = "mca"
-description = "Read / Write Minecraft Region Files (mca)"
-version = "1.1.0"
-edition = "2021"
+description = "Reader/Writer for Minecraft Region Files (.mca / Anvil File Format)"
+version = "2.0.0"
+edition = "2024"
 license = "MIT"
 authors = ["VilleOlof"]
-readme = "README.md"
+readme = "readme.md"
 repository = "https://github.com/VilleOlof/mca"
 homepage = "https://github.com/VilleOlof/mca"
 keywords = ["minecraft", "region", "mca", "parser", "chunk"]
-categories = ["game-development", "parsing"]
+categories = ["parsing"]
+exclude = ["data/*"]
 
 [dependencies]
-thiserror = "1.0"
-miniz_oxide = { version = "0.8.9", features = ["std"] }
+flate2 = { version = "1.1.9", features = ["zlib-rs"], default-features = false }
 lz4-java-wrc = "0.2.0"
+rayon = { version = "1.11.0", optional = true }
+thiserror = "2.0"
 
 [dev-dependencies]
-criterion = "0.5.1"
+criterion = { version = "0.8", features = ["html_reports"] }
+old_mca = { package = "mca", version = "1.1.0", features = ["unsafe"] }
 mca-parser = "1.0.2"
-sculk = { git = "https://github.com/VilleOlof/sculk" }
-simdnbt = "0.6.0"
+simple-anvil = "0.3.3"
+anvil-nbt = "0.2.0"
+lzma-rust2 = "0.16.2"
+na_nbt = { version = "0.2.1", features = ["shared"], default-features = false }
 
-[[bench]]
-name = "region_parsing"
-harness = false
+[profile.release]
+opt-level = 3
+codegen-units = 1
 
 [features]
-unsafe = []
+default = ["rayon"]
+rayon = ["dep:rayon"]
+
+[[bench]]
+name = "read"
+harness = false
+
+[[bench]]
+name = "write"
+harness = false
+required-features = ["rayon"]
+
+[[bench]]
+name = "compare"
+harness = false
+
+[[bench]]
+name = "get_chunk_data"
+harness = false
+
+[[bench]]
+name = "write_packed"
+harness = false
+
+[[bench]]
+name = "custom_compression"
+harness = false
+
+[[bench]]
+name = "write_single"
+harness = false
