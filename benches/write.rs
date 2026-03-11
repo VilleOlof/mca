@@ -41,6 +41,30 @@ fn mca(r: &mut mca::RegionReader) {
     w.write(&mut buf).unwrap();
 }
 
+fn anvil_nbt(r: &mut mca::RegionReader) {
+    let buf = std::io::Cursor::new(Vec::new());
+    let mut w = anvil_nbt::anvil::encode::RegionWriter::new(buf);
+
+    let mut chunks = Vec::new();
+    for (x, z) in ChunkIter::new() {
+        if let Some(chunk) = r.chunk_data(x as u8, z as u8).unwrap() {
+            let mut decompressed = r.decompress_to_internal_buffer(chunk).unwrap();
+
+            // we HAVE to use their bullshit nbt to write the data and not our raw nbt buffer
+            // i swear this crate is ragebait, unrelated rant: it mentions that its byte to byte perfect
+            // in encoding/decoding, but it literally removes your timestamp data
+            // it just writes all 0s in your timestamp header and doesnt give a fuck about your old timestamps
+            // and says its "byte to byte perfect", now i dont use old timestapms either and use new current time
+            // but i dont claim mine is byte to byte perfect at least, grrrr <3
+            let nbt = anvil_nbt::nbt::parse::parse_named_tag(&mut decompressed).unwrap();
+
+            chunks.push((x as i32, z as i32, nbt.0, nbt.1));
+        }
+    }
+
+    w.write_all_chunks(&chunks).unwrap();
+}
+
 fn criterion_benchmark(c: &mut Criterion) {
     let region_len = std::fs::read(REGION_PATH).unwrap().len();
 
@@ -55,6 +79,9 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let mut r = mca::RegionReader::new(&region).unwrap();
     group.bench_function("mca", |b| b.iter(|| mca(&mut r)));
+
+    let mut r = mca::RegionReader::new(&region).unwrap();
+    group.bench_function("anvil_nbt", |b| b.iter(|| anvil_nbt(&mut r)));
 
     group.finish();
 }
