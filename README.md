@@ -2,13 +2,13 @@
 
 > Reader/Writer for Minecraft regions files *(.mca)*
 
-This library fully implements the [Region File Format](https://minecraft.wiki/w/Region_file_format) from Minecraft 1.2.1+  
+This library fully implements the [Region File Format](https://minecraft.wiki/w/Region_file_format) from Minecraft **1.2.1+**  
 Both reading and writing regions in anyway you like.  
 
 Notably this library implements all compressions in vanilla (`GZip`, `Zlib`, `Uncompressed`, `LZ4`).  
 As well as custom compression algorithms for both compressing and decompressing *(see below for examples)*.  
 
-It's also one of the fastest *(if not fastest)* `.mca` Rust library *(see benchmarks below)*.  
+It's also ***the fastest*** `.mca` Rust library *(see benchmarks below)*.  
 
 ## Installation
 
@@ -16,7 +16,7 @@ Add this to your `cargo.toml`
 
 ```toml
 [dependencies]
-mca = "2"
+mca = "2.1"
 ```
 
 ## Quick start
@@ -133,7 +133,7 @@ Ok::<(), mca::McaError>(())
 The `.write` function on `RegionWriter` already compresses all chunks in parallel by default.  
 This can be disabled via disabling default features in your `cargo.toml`
 ```toml
-mca = { version = "2", default-features = false }
+mca = { version = "2.1", default-features = false }
 ```
 
 But reading chunks in parallel requires a bit more manual work for you to do.  
@@ -169,7 +169,6 @@ let chunks = (0..(REGION_SIZE * REGION_SIZE)).into_par_iter().map(|c| {
 Ok::<(), mca::McaError>(())
 ```
 
-
 ### Reader to Writer
 
 Sometimes you might want to read in a region file and modify it's existing data and write it back.  
@@ -179,7 +178,7 @@ And it only ever decompresses data that you modify with `set_chunk` or `chunk_mu
 Any unmodified chunk will remain compress and untouched, ensuring maximal performance.  
 
 Important to note that you can use `PackedChunk`s with `RegionWriter::write_packed`,  
-to gain even more control on the data written and you handle the compression etc.  
+to gain even more control on the data written and how you handle the compression etc.  
 
 ```rust ignore
 use mca::{RegionReader, Compression};

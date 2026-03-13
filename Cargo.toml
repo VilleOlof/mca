@@ -1,7 +1,7 @@
 [package]
 name = "mca"
-description = "Reader/Writer for Minecraft Region Files (.mca / Anvil File Format)"
-version = "2.1.0"
+description = "Reader/Writer for Minecraft Region Files (.mca)"
+version = "2.1.1"
 edition = "2024"
 license = "MIT"
 authors = ["VilleOlof"]
