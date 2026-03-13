@@ -37,7 +37,7 @@ impl CustomDecompression for Raw {
 impl CustomCompression for Raw {
     fn compress(
         &self,
-        data: Vec<u8>,
+        data: &[u8],
         algorithm: &str,
         out: &mut Vec<u8>,
     ) -> Result<(), CompressionError> {
@@ -45,7 +45,7 @@ impl CustomCompression for Raw {
             return Err(CompressionError::Unsupported);
         }
 
-        *out = data;
+        *out = data.to_vec();
 
         Ok(())
     }

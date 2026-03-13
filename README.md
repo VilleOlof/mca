@@ -111,7 +111,7 @@ use mca::{CustomCompression, CustomDecompression, RegionWriter, RegionReader, Co
 
 struct MyCompressionScheme;
 impl CustomCompression for MyCompressionScheme {
-    fn compress(&self, data: Vec<u8>, algorithm: &str, out: &mut Vec<u8>) -> Result<(), CompressionError> {
+    fn compress(&self, data: &[u8], algorithm: &str, out: &mut Vec<u8>) -> Result<(), CompressionError> {
         todo!("write the actual implementation")
     }
 }
@@ -173,12 +173,13 @@ Ok::<(), mca::McaError>(())
 ### Reader to Writer
 
 Sometimes you might want to read in a region file and modify it's existing data and write it back.  
-To make this easier you can use `into_writer` which will decompress all chunks and call `set_chunk`
-on a new writer to move over all the data.  
+To make this easier you can use `into_writer`, it converts a `ReginoReader` to a `RegionWriter`.  
+And it only ever decompresses data that you modify with `set_chunk` or `chunk_mut`.  
 
-Important to note that this decompresses all chunks and thus also needs to compress it all once you write them.  
-If you want better peformance you can make `PackedChunk`s on your own to only decompress/compress  
-the chunks you want. Look at that and `RegionWriter::write_packed` and `RegionReader::chunk_data` for more info.  
+Any unmodified chunk will remain compress and untouched, ensuring maximal performance.  
+
+Important to note that you can use `PackedChunk`s with `RegionWriter::write_packed`,  
+to gain even more control on the data written and you handle the compression etc.  
 
 ```rust ignore
 use mca::{RegionReader, Compression};
@@ -190,9 +191,11 @@ let region = RegionReader::new(&file)?;
 let mut writer = region.into_writer(())?;
 
 // change the chunks compression to Lz4
-// here you would access `chunk.data` and modify its nbt
+// here you would access `data.buf` and modify its nbt
 if let Some(chunk) = writer.chunk_mut(1, 4)? {
-    chunk.compression = Compression::Lz4;
+    // Again, we pass &() to specify no custom compression
+    let data = chunk.data.as_uncompressed_mut(&())?;
+    data.compression = Compression::Lz4;
 }
 
 let mut buf = Vec::new();

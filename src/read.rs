@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use crate::{
     ChunkIter, Compression, CompressionError, CustomCompression, CustomDecompression, McaError,
     REGION_SIZE, RegionIter, RegionWriter, SECTOR_SIZE, header_offset,
+    write::{PendingData, WritableChunk},
 };
 
 /// A representation of a Minecraft **[Region](https://minecraft.wiki/w/Region_file_format)**, used to read and decompress the format.  
@@ -450,7 +451,10 @@ impl<'a, D: CustomDecompression> RegionReader<'a, D> {
     pub fn iter(&'a self) -> Result<RegionIter<'a, D>, McaError> {
         RegionIter::new(self)
     }
+}
 
+// Need to clone the custom decompression to give it to the writer so special case
+impl<'a, D: CustomDecompression + Clone> RegionReader<'a, D> {
     /// Reads all chunks in this [`RegionReader`], decompresses it and sets it inside a [`RegionWriter`]
     ///
     /// Useful if you want to read in a region file and modify it, see example below on how.  
@@ -474,22 +478,22 @@ impl<'a, D: CustomDecompression> RegionReader<'a, D> {
     /// # Ok::<(), mca::McaError>(())
     /// ```
     pub fn into_writer<C: CustomCompression>(
-        &self,
+        &'a self,
         custom_compression: C,
-    ) -> Result<RegionWriter<C>, McaError> {
+    ) -> Result<RegionWriter<'a, C>, McaError> {
         let mut w = RegionWriter::new_with_compression(custom_compression);
 
         for (x, z) in ChunkIter::new() {
             if let Some(data) = self.chunk_data(x, z)? {
-                let mut uncompressed = Vec::with_capacity(256_000);
-                RegionReader::decompress_data_ref(
-                    data.data,
-                    data.compression.clone(),
-                    &mut uncompressed,
-                    &self.custom_decompression,
-                )?;
-
-                w.set_chunk(x, z, uncompressed, data.compression)?;
+                *w.chunk_mut(x, z)? = Some(WritableChunk {
+                    // wanna remove this clone but like, lifetime are hard :c
+                    data: PendingData::new_compressed(
+                        data.data.as_ref().to_owned(),
+                        data.compression,
+                    ),
+                    chunk: (x, z),
+                    timestamp: None,
+                });
             }
         }
 
@@ -527,15 +531,12 @@ impl Debug for CompressedChunk<'_> {
     }
 }
 
-impl From<RegionReader<'_, ()>> for RegionWriter<()> {
-    fn from(value: RegionReader<'_, ()>) -> Self {
-        value.into_writer(()).unwrap()
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use crate::{ChunkIter, McaError, REGION_SIZE, RegionReader, RegionWriter, regions::*};
+    use crate::{
+        ChunkIter, McaError, REGION_SIZE, RegionReader, RegionWriter, regions::*,
+        write::PendingData,
+    };
     use na_nbt::{CompoundRef, ValueRef};
     use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
@@ -731,12 +732,13 @@ mod test {
         let mut writer = region.into_writer(())?;
 
         if let Some(chunk) = writer.chunk_mut(8, 24)? {
-            let mut nbt = read_owned::<BE, BE>(&chunk.data).unwrap();
+            let data = &chunk.data.as_uncompressed_mut(&())?.buf;
+            let mut nbt = read_owned::<BE, BE>(data).unwrap();
             let last_update = nbt.get_mut_::<tag::Long>("LastUpdate").unwrap();
             last_update.set(5555);
 
             let bytes = nbt.write_to_vec::<BE>();
-            chunk.data = bytes;
+            chunk.data = PendingData::new_uncompressed(bytes, chunk.data.compression().clone());
         }
 
         let mut file = Vec::new();

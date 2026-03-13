@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use mca::{PackedChunk, REGION_SIZE, RegionReader, RegionWriter};
+use mca::{REGION_SIZE, RegionReader, RegionWriter, write::PackedChunk};
 
 const REGION_PATH: &'static str = "data/full.mca";
 
@@ -26,7 +26,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             let chunk = r.chunk_data(x, z).unwrap().unwrap();
 
             let packed = PackedChunk {
-                compressed: chunk.data.as_ref().to_vec(),
+                compressed: chunk.data.as_ref().to_vec().into(),
                 compression: chunk.compression.clone(),
                 chunk: (x, z),
                 sector_size: RegionWriter::sector_size(

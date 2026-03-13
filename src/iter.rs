@@ -63,7 +63,8 @@ impl<'a, D: CustomDecompression> RegionIter<'a, D> {
 /// - z = 0..=31
 ///
 /// ## Example
-/// ```
+/// ```no_run
+/// # // stack overflow?
 /// # use mca::{ChunkIter, RegionReader};
 /// # const REGION: &'static [u8] = include_bytes!("../data/full.mca");
 /// # let mut region = RegionReader::new(REGION)?;

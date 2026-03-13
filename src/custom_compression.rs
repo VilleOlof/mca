@@ -39,14 +39,14 @@ pub trait CustomCompression: Send + Sync {
     /// Takes in a raw uncompressed chunk data (`data`), the algorithm used and the final compressed data should be written to `out`.  
     fn compress(
         &self,
-        data: Vec<u8>,
+        data: &[u8],
         algorithm: &str,
         out: &mut Vec<u8>,
     ) -> Result<(), CompressionError>;
 }
 
 impl CustomCompression for () {
-    fn compress(&self, _: Vec<u8>, _: &str, _: &mut Vec<u8>) -> Result<(), CompressionError> {
+    fn compress(&self, _: &[u8], _: &str, _: &mut Vec<u8>) -> Result<(), CompressionError> {
         Err(CompressionError::Unsupported)
     }
 }
@@ -79,7 +79,7 @@ mod test {
     impl CustomCompression for LZMA2Format {
         fn compress(
             &self,
-            data: Vec<u8>,
+            data: &[u8],
             algorithm: &str,
             out: &mut Vec<u8>,
         ) -> Result<(), crate::CompressionError> {

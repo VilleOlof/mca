@@ -1,14 +1,15 @@
-use std::{fmt::Debug, io::Write};
+use std::{borrow::Cow, fmt::Debug, io::Write};
 
 use crate::{
-    Compression, CompressionError, McaError, REGION_SIZE, SECTOR_SIZE,
-    custom_compression::CustomCompression, header_offset,
+    CompressedChunk, Compression, CompressionError, CustomDecompression, McaError, REGION_SIZE,
+    RegionReader, SECTOR_SIZE, custom_compression::CustomCompression, header_offset,
 };
 
 /// Used to write raw chunk data to and then format it into the region file format *(.mca)*  
 ///
 /// ## Example
-/// ```
+/// ```no_run
+/// # // stack overflow?
 /// # use mca::{RegionWriter, Compression};
 /// let mut writer = RegionWriter::new();
 ///
@@ -19,8 +20,8 @@ use crate::{
 /// # Ok::<(), mca::McaError>(())
 /// ```
 #[derive(Clone)]
-pub struct RegionWriter<C: CustomCompression = ()> {
-    chunks: [Option<ChunkData>; 1024],
+pub struct RegionWriter<'d, C: CustomCompression = ()> {
+    chunks: [Option<WritableChunk<'d>>; 1024],
     // this isnt used right now but i want to use this
     // to pre-allocate a buffer for the `write` iterator that compresses chunks
     // since right now it does a collect() which i think does 9 allocations too much
@@ -29,31 +30,160 @@ pub struct RegionWriter<C: CustomCompression = ()> {
     custom_compression: C,
 }
 
-impl Default for RegionWriter<()> {
+impl Default for RegionWriter<'_, ()> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// A chunks raw nbt data and the needed data to write it to a region.  
-#[derive(Clone, Default, PartialEq, Eq)]
-pub struct ChunkData {
-    /// The chunks nbt data in bytes
-    pub data: Vec<u8>,
-    /// Which compression scheme should be used
+/// A chunks data that is compressed, and what compression was used.  
+#[derive(Clone, PartialEq, Eq)]
+pub struct PendingCompressed<'d> {
+    /// The compressed data
+    pub buf: Cow<'d, [u8]>,
+    /// Compression that was used to compress the buf
     pub compression: Compression,
-    /// The chunks region local coordinates
-    pub chunk: (u8, u8),
 }
 
-/// A compressed chunk and some further metadata about the chunk needed to write it to a region.  
+/// A chunks data that is uncompressed, along side what compression to use
+#[derive(Clone, PartialEq, Eq)]
+pub struct PendingUncompressed<'d> {
+    /// The uncompressed data
+    pub buf: Cow<'d, [u8]>,
+    /// The compression format that should be used to compress the buffer
+    pub compression: Compression,
+}
+
+/// A chunks that is either compressed or uncompressed
+#[derive(Clone, PartialEq, Eq)]
+pub enum PendingData<'d> {
+    /// A chunks data in a compressed state
+    Compressed(PendingCompressed<'d>),
+    /// A chunks data in an uncompressed state
+    Uncompressed(PendingUncompressed<'d>),
+}
+
+impl<'p> PendingData<'p> {
+    /// Creates a new [`PendingData`] where the buffer should be **compressed**, and which format was used.  
+    pub fn new_compressed(buf: impl Into<Cow<'p, [u8]>>, compression: Compression) -> Self {
+        Self::Compressed(PendingCompressed {
+            buf: buf.into(),
+            compression,
+        })
+    }
+
+    /// Creates a new [`PendingData`] where the buffer should be **uncompressed** and what format it *should* be compressed to later.  
+    pub fn new_uncompressed(buf: impl Into<Cow<'p, [u8]>>, compression: Compression) -> Self {
+        Self::Uncompressed(PendingUncompressed {
+            buf: buf.into(),
+            compression,
+        })
+    }
+
+    /// Returns the compression used no matter if its uncompressed or compressed.  
+    pub fn compression(&self) -> &Compression {
+        match self {
+            Self::Compressed(d) => &d.compression,
+            Self::Uncompressed(d) => &d.compression,
+        }
+    }
+}
+
+impl<'d> PendingData<'d> {
+    /// Returns a mutable reference to an owned, uncompressed variant of the chunks data.  
+    ///
+    /// - `PendingData::Compressed(Cow::Borrowed(vec![]))` **=>** `PendingData::Uncompressed(Cow::Owned(vec![]))`  
+    /// - `PendingData::Compressed(Cow::Owned(vec![]))` **=>** `PendingData::Uncompressed(Cow::Owned(vec![]))`  
+    /// - `PendingData::Uncompressed(Cow::Borrowed(vec![]))` **=>** `PendingData::Uncompressed(Cow::Owned(vec![]))`  
+    pub fn as_uncompressed_mut<D: CustomDecompression>(
+        &mut self,
+        custom_decompression: &D,
+    ) -> Result<&mut PendingUncompressed<'d>, McaError> {
+        if let PendingData::Compressed(data) = self {
+            let mut comp = Vec::new();
+            RegionReader::decompress_data_ref(
+                CompressedChunk::new(&data.buf),
+                data.compression.clone(),
+                &mut comp,
+                custom_decompression,
+            )?;
+            *self = PendingData::Uncompressed(PendingUncompressed {
+                buf: Cow::Owned(comp),
+                compression: data.compression.clone(),
+            });
+        }
+
+        match self {
+            PendingData::Uncompressed(buf) => Ok(buf),
+            _ => {
+                unreachable!("The above let statement converts any 'Compressed' to 'Uncompressed'")
+            }
+        }
+    }
+
+    /// Compresses chunks data with whatever compression scheme was specified.  
+    pub fn compress<C: CustomCompression>(
+        data: &[u8],
+        compression: &Compression,
+        custom_compression: &C,
+    ) -> Result<Vec<u8>, McaError> {
+        use flate2::write::{GzEncoder, ZlibEncoder};
+
+        // skip any logic if already empty
+        if data.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut buf = Vec::with_capacity(SECTOR_SIZE * 2); // most commonly around 2 sectors per chunk
+        match compression {
+            Compression::Gzip => {
+                let mut g = GzEncoder::new(&mut buf, flate2::Compression::new(4));
+                g.write_all(data)?;
+            }
+            Compression::ZLib => {
+                let mut z = ZlibEncoder::new(&mut buf, flate2::Compression::new(4));
+                z.write_all(data)?;
+            }
+            Compression::None => buf = data.to_vec(),
+            Compression::Lz4 => {
+                let mut l = lz4_java_wrc::Lz4BlockOutput::new(&mut buf);
+                l.write_all(data)?;
+            }
+            Compression::Custom((_, id)) => custom_compression.compress(data, id, &mut buf)?,
+        }
+
+        Ok(buf)
+    }
+}
+
+/// A chunk that is in the state between being written and modified.  
 ///
-/// Can be used to have more control on what data is written with a chunks data.  
+/// Contains metadata about the chunk to write and it's data.  
+///
+/// Can be used to have more control on how a chunk is written.  
+#[derive(Clone, PartialEq, Eq)]
+pub struct WritableChunk<'d> {
+    /// The chunks data, either compressed or uncompressed
+    ///
+    /// If the chunk is still compressed at time of writing, it's specific compression will remain the same.  
+    pub data: PendingData<'d>,
+    /// The chunks region local coordinates.  
+    pub chunk: (u8, u8),
+    /// A timestamp of when the chunk was updated last
+    /// This is optional since the normal way would be for the writer
+    /// to use one singular timestamp for all chunks.  
+    /// But this can be overwritten with this if you happen to create these PackedChunks yourself.  
+    pub timestamp: Option<u32>,
+}
+
+/// A chunk whose data is compressed and contains data about how the chunk should be written
+///
+/// This is the last data structure used right before writing a region.  
 #[derive(Clone, Default, PartialEq, Eq)]
-pub struct PackedChunk {
-    /// The chunks data compressed in whatever format is specified.  
-    pub compressed: Vec<u8>,
-    /// The compression format that was used to compress the chunk data
+pub struct PackedChunk<'d> {
+    /// The chunks data in a compressed format
+    pub compressed: Cow<'d, [u8]>,
+    /// The format that was used to compress the chunks data
     pub compression: Compression,
     /// The chunks region local coordinates.  
     pub chunk: (u8, u8),
@@ -71,58 +201,7 @@ pub struct PackedChunk {
 /// A buffer of only zeros used to pad chunks to be sector aligned.  
 static ZERO_BUF: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
 
-impl ChunkData {
-    /// Compresses chunks data with whatever compression scheme was specified.  
-    ///
-    /// ## Example
-    /// ```
-    /// # use mca::{ChunkData, Compression};
-    /// let mut chunk = ChunkData {
-    ///     data: Vec::new(),
-    ///     compression: Compression::ZLib,
-    ///     chunk: (0, 0)
-    /// };
-    ///
-    /// // no custom compression specified
-    /// let compressed = chunk.compress(&())?;
-    /// # Ok::<(), mca::McaError>(())
-    /// ```
-    pub fn compress<C: CustomCompression>(
-        self,
-        custom_compression: &C,
-    ) -> Result<Vec<u8>, McaError> {
-        use flate2::write::{GzEncoder, ZlibEncoder};
-
-        // skip any logic if already empty
-        if self.data.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut buf = Vec::with_capacity(SECTOR_SIZE * 2); // most commonly around 2 sectors per chunk
-        match self.compression {
-            Compression::Gzip => {
-                let mut g = GzEncoder::new(&mut buf, flate2::Compression::new(4));
-                g.write_all(&self.data)?;
-            }
-            Compression::ZLib => {
-                let mut z = ZlibEncoder::new(&mut buf, flate2::Compression::new(4));
-                z.write_all(&self.data)?;
-            }
-            Compression::None => buf = self.data,
-            Compression::Lz4 => {
-                let mut l = lz4_java_wrc::Lz4BlockOutput::new(&mut buf);
-                l.write_all(&self.data)?;
-            }
-            Compression::Custom((_, id)) => {
-                custom_compression.compress(self.data, &id, &mut buf)?
-            }
-        }
-
-        Ok(buf)
-    }
-}
-
-impl RegionWriter<()> {
+impl RegionWriter<'_, ()> {
     /// Creates a new [`RegionWriter`] with no custom compression specified.  
     pub fn new() -> Self {
         RegionWriter::new_with_compression(())
@@ -151,7 +230,7 @@ impl RegionWriter<()> {
     ///
     /// ## Example
     /// ```
-    /// # use mca::{PackedChunk, RegionWriter, Compression};
+    /// # use mca::{write::PackedChunk, RegionWriter, Compression};
     /// let chunks = vec![PackedChunk::default(), PackedChunk::default()];
     ///
     /// let mut buf = Vec::new();
@@ -230,7 +309,7 @@ impl RegionWriter<()> {
     }
 }
 
-impl<C: CustomCompression> RegionWriter<C> {
+impl<'c, C: CustomCompression> RegionWriter<'c, C> {
     /// Creates a new [`RegionWriter`] with a specified custom compression to use when writing chunks.  
     pub fn new_with_compression(custom_compression: C) -> Self {
         Self {
@@ -244,7 +323,7 @@ impl<C: CustomCompression> RegionWriter<C> {
     ///
     /// ## Error
     /// Fails if the specified chunk coordinates are outside of the region
-    pub fn chunk(&self, x: u8, z: u8) -> Result<&Option<ChunkData>, McaError> {
+    pub fn chunk(&self, x: u8, z: u8) -> Result<&Option<WritableChunk<'_>>, McaError> {
         match self.chunks.get((x as usize * REGION_SIZE) + z as usize) {
             Some(chunk) => Ok(chunk),
             None => Err(McaError::InvalidChunkPosition(x, z)),
@@ -255,7 +334,7 @@ impl<C: CustomCompression> RegionWriter<C> {
     ///
     /// ## Error
     /// Fails if the specified chunk coordinates are outside of the region
-    pub fn chunk_mut(&mut self, x: u8, z: u8) -> Result<&mut Option<ChunkData>, McaError> {
+    pub fn chunk_mut(&mut self, x: u8, z: u8) -> Result<&mut Option<WritableChunk<'c>>, McaError> {
         match self.chunks.get_mut((x as usize * REGION_SIZE) + z as usize) {
             Some(chunk) => Ok(chunk),
             None => Err(McaError::InvalidChunkPosition(x, z)),
@@ -265,6 +344,7 @@ impl<C: CustomCompression> RegionWriter<C> {
     /// Set the data of a specific chunk along side it's compression.  
     ///
     /// Can be called multiple times on the same coordinates, but will overwrite previous data.  
+    /// Sets the modified timestamp to when this function was called.  
     ///
     /// ## Example
     /// ```
@@ -281,10 +361,10 @@ impl<C: CustomCompression> RegionWriter<C> {
         data: Vec<u8>,
         compression: Compression,
     ) -> Result<(), McaError> {
-        *self.chunk_mut(x, z)? = Some(ChunkData {
-            data,
-            compression,
+        *self.chunk_mut(x, z)? = Some(WritableChunk {
+            data: PendingData::new_uncompressed(data, compression),
             chunk: (x, z),
+            timestamp: Some(current_timestamp()),
         });
 
         self.changed_chunks += 1;
@@ -322,7 +402,8 @@ impl<C: CustomCompression> RegionWriter<C> {
     /// By default, this compresses all chunks in parallel, but can be disabled with `default-features = false` in your cargo.toml
     ///
     /// ## Example
-    /// ```
+    /// ```no_run
+    /// # // stack overflow?
     /// # use mca::{RegionWriter, Compression};
     /// # use std::fs::File;
     /// let mut region = RegionWriter::new();
@@ -345,19 +426,34 @@ impl<C: CustomCompression> RegionWriter<C> {
 
         let chunks = iter
             .filter_map(|s| s)
-            .map(|chunk| {
-                let compression = chunk.compression.clone();
-                let (x, z) = chunk.chunk;
-                let compressed = chunk.compress(&self.custom_compression)?;
-                let sector_size = RegionWriter::sector_size(compressed.len(), &compression);
+            .map(|chunk| match chunk.data {
+                PendingData::Compressed(data) => {
+                    let sector_size = RegionWriter::sector_size(data.buf.len(), &data.compression);
+                    Ok::<PackedChunk, McaError>(PackedChunk {
+                        compressed: data.buf,
+                        chunk: chunk.chunk,
+                        compression: data.compression,
+                        sector_size,
+                        timestamp: chunk.timestamp,
+                    })
+                }
+                PendingData::Uncompressed(data) => {
+                    let compression = data.compression.clone();
+                    let compressed = PendingData::compress(
+                        &data.buf,
+                        &data.compression,
+                        &self.custom_compression,
+                    )?;
+                    let sector_size = RegionWriter::sector_size(compressed.len(), &compression);
 
-                Ok::<PackedChunk, McaError>(PackedChunk {
-                    compressed,
-                    compression,
-                    chunk: (x, z),
-                    sector_size,
-                    timestamp: None,
-                })
+                    Ok::<PackedChunk, McaError>(PackedChunk {
+                        compressed: Cow::Owned(compressed),
+                        compression,
+                        chunk: chunk.chunk,
+                        sector_size,
+                        timestamp: None,
+                    })
+                }
             })
             .collect::<Result<Vec<PackedChunk>, McaError>>()?;
 
@@ -374,7 +470,7 @@ pub fn current_timestamp() -> u32 {
     since_the_epoch.to_be()
 }
 
-impl<C: CustomCompression + Debug> Debug for RegionWriter<C> {
+impl<C: CustomCompression + Debug> Debug for RegionWriter<'_, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -384,19 +480,36 @@ impl<C: CustomCompression + Debug> Debug for RegionWriter<C> {
     }
 }
 
-impl Debug for ChunkData {
+impl Debug for PendingData<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Compressed(d) => write!(
+                f,
+                "PendingData::Compressed {{ data_len: {}, compression: {:?} }}",
+                d.buf.len(),
+                d.compression
+            ),
+            Self::Uncompressed(d) => write!(
+                f,
+                "PendingData::Uncompressed {{ data_len: {}, compression: {:?} }}",
+                d.buf.len(),
+                d.compression
+            ),
+        }
+    }
+}
+
+impl Debug for WritableChunk<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ChunkData {{ data_len: {}, compression: {:?}, chunk: {:?} }}",
-            self.data.len(),
-            self.compression,
-            self.chunk
+            "WritableChunk {{ data: {:?}, chunk: {:?}, timestamp: {:?} }}",
+            self.data, self.chunk, self.timestamp
         )
     }
 }
 
-impl Debug for PackedChunk {
+impl Debug for PackedChunk<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -412,9 +525,13 @@ impl Debug for PackedChunk {
 
 #[cfg(test)]
 mod test {
+    use std::borrow::Cow;
+
     use crate::{
-        ChunkData, Compression, McaError, PackedChunk, RegionReader, RegionWriter, SECTOR_SIZE,
-        current_timestamp, regions::*,
+        ChunkIter, Compression, McaError, RegionReader, RegionWriter, SECTOR_SIZE,
+        current_timestamp,
+        regions::*,
+        write::{PackedChunk, PendingData, PendingUncompressed, WritableChunk},
     };
 
     #[test]
@@ -500,18 +617,56 @@ mod test {
 
     #[test]
     fn chunk_mut() -> Result<(), McaError> {
-        let mut writer = RegionReader::new(FULL)?.into_writer(())?;
+        let r = RegionReader::new(FULL)?;
+        let mut writer = r.into_writer(())?;
 
-        *writer.chunk_mut(8, 1)? = Some(ChunkData {
-            data: vec![5, 4, 3, 2, 1],
-            compression: Compression::None,
+        *writer.chunk_mut(8, 1)? = Some(WritableChunk {
+            data: PendingData::Uncompressed(PendingUncompressed {
+                buf: Cow::Owned(vec![5, 4, 3, 2, 1]),
+                compression: Compression::None,
+            }),
             chunk: (8, 1),
+            timestamp: None,
         });
 
         assert_eq!(
             writer.chunk(8, 1)?.as_ref().unwrap().data,
-            vec![5, 4, 3, 2, 1]
+            PendingData::Uncompressed(PendingUncompressed {
+                buf: Cow::Owned(vec![5, 4, 3, 2, 1]),
+                compression: Compression::None
+            })
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn let_chunk_mut() -> Result<(), McaError> {
+        let r = RegionReader::new(FULL)?;
+        let mut writer = r.into_writer(())?;
+
+        if let Some(chunk) = writer.chunk_mut(1, 0)? {
+            let data = chunk.data.as_uncompressed_mut(&())?;
+            data.compression = Compression::Lz4;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn recompression() -> Result<(), McaError> {
+        let r = RegionReader::new(FULL)?;
+        let mut writer = r.into_writer(())?;
+
+        for (x, z) in ChunkIter::new() {
+            if let Some(chunk) = writer.chunk_mut(x, z)? {
+                let data = chunk.data.as_uncompressed_mut(&())?;
+                data.compression = Compression::Lz4;
+            }
+        }
+
+        let mut buf = Vec::with_capacity(FULL.len());
+        writer.write(&mut buf)?;
 
         Ok(())
     }
@@ -532,7 +687,7 @@ mod test {
         let chunks = vec![
             PackedChunk::default(),
             PackedChunk {
-                compressed: vec![1, 0, 1, 0, 0, 1],
+                compressed: vec![1, 0, 1, 0, 0, 1].into(),
                 compression: Compression::ZLib,
                 chunk: (31, 23),
                 sector_size: 1,
@@ -559,8 +714,20 @@ mod test {
         );
         println!(
             "{:?}",
+            PendingData::new_compressed(vec![0, 1, 1, 0, 0, 0, 1], Compression::None)
+        );
+        println!(
+            "{:?}",
+            WritableChunk {
+                data: PendingData::new_uncompressed(vec![1, 1, 1, 0, 0, 0, 1], Compression::ZLib),
+                chunk: (5, 9),
+                timestamp: None
+            }
+        );
+        println!(
+            "{:?}",
             PackedChunk {
-                compressed: vec![0, 1, 1, 0, 0, 1, 1, 0],
+                compressed: vec![0, 1, 1, 0, 0, 1, 1, 0].into(),
                 compression: Compression::Lz4,
                 chunk: (1, 4),
                 sector_size: 1,

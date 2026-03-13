@@ -5,14 +5,14 @@ mod custom_compression;
 mod error;
 mod iter;
 mod read;
-mod write;
+pub mod write;
 
 pub use compression::Compression;
 pub use custom_compression::{CustomCompression, CustomDecompression};
 pub use error::{CompressionError, McaError};
 pub use iter::{AvailableChunk, ChunkIter, RegionIter};
 pub use read::{ChunkDataRef, CompressedChunk, RegionReader};
-pub use write::{ChunkData, PackedChunk, RegionWriter, current_timestamp};
+pub use write::{RegionWriter, current_timestamp};
 
 /// How many chunks exist in a direction, one region has a total of [`REGION_SIZE`] * [`REGION_SIZE`] chunks.  
 pub const REGION_SIZE: usize = 32;
