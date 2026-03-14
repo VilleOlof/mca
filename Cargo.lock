@@ -524,7 +524,7 @@ dependencies = [
 
 [[package]]
 name = "mca"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "anvil-nbt",
  "criterion",

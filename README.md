@@ -172,7 +172,7 @@ Ok::<(), mca::McaError>(())
 ### Reader to Writer
 
 Sometimes you might want to read in a region file and modify it's existing data and write it back.  
-To make this easier you can use `into_writer`, it converts a `ReginoReader` to a `RegionWriter`.  
+To make this easier you can use `into_writer`, it converts a `RegionReader` to a `RegionWriter`.  
 And it only ever decompresses data that you modify with `set_chunk` or `chunk_mut`.  
 
 Any unmodified chunk will remain compress and untouched, ensuring maximal performance.  

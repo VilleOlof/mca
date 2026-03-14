@@ -48,6 +48,6 @@ pub enum CompressionError {
     #[error("Custom compression id can't be bigger than {}", u8::MAX)]
     CustomIdTooBig(String),
     /// To use a custom compression format, use `Region::with_decompression(x)` and something that implements `CustomDecompression` that can handle the different compression bytes that suits your needs
-    #[error("Found a unspported compression format")]
+    #[error("Found an unsupported compression format")]
     Unsupported,
 }
