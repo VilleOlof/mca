@@ -44,7 +44,7 @@ pub enum CompressionError {
     #[error("Failed to compress/uncompress LZ4: {0}")]
     LZ4(std::io::Error),
     #[error("Failed to compress/uncompress a custom format: {0}")]
-    Custom(Box<dyn std::error::Error + Send>),
+    Custom(Box<dyn std::error::Error + Send + Sync>),
     #[error("Custom compression id can't be bigger than {}", u8::MAX)]
     CustomIdTooBig(String),
     /// To use a custom compression format, use `Region::with_decompression(x)` and something that implements `CustomDecompression` that can handle the different compression bytes that suits your needs
