@@ -1,0 +1,26 @@
+[package]
+name = "mca-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[dependencies]
+libfuzzer-sys = "0.4.0"
+mca = { path = ".." }
+
+[package.metadata]
+cargo-fuzz = true
+
+[[bin]]
+name = "read"
+path = "fuzz_targets/read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "write"
+path = "fuzz_targets/write.rs"
+test = false
+doc = false
+bench = false

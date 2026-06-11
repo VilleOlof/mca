@@ -10,7 +10,7 @@ repository = "https://github.com/VilleOlof/mca"
 homepage = "https://github.com/VilleOlof/mca"
 keywords = ["minecraft", "region", "mca", "parser", "chunk"]
 categories = ["parsing"]
-exclude = ["data/*"]
+exclude = ["/data", "/fuzz"]
 
 [dependencies]
 flate2 = { version = "1.1.9", features = ["zlib-rs"], default-features = false }
@@ -26,6 +26,10 @@ simple-anvil = "0.3.3"
 anvil-nbt = "0.2.0"
 lzma-rust2 = "0.16.2"
 na_nbt = { version = "0.2.1", features = ["shared"], default-features = false }
+
+[workspace]
+members = ["fuzz"]
+resolver = "3"
 
 [profile.release]
 opt-level = 3
